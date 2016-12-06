@@ -11,7 +11,7 @@ func OwnerHandler(c oauth2.Config) func(rw http.ResponseWriter, req *http.Reques
 	return func(rw http.ResponseWriter, req *http.Request) {
 		rw.Write([]byte("<h1>Resource Owner Password Credentials Grant</h1>"))
 		req.ParseForm()
-		if req.Form.Get("username") == "" || req.Form.Get("password") == "" {
+		if req.Form.Get("username") == "" {
 			rw.Write([]byte(`<form method="post">
 			<ul>
 				<li>
