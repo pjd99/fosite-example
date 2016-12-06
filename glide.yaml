@@ -1,4 +1,4 @@
-package: github.com/ory-am/fosite-example
+package: github.com/pjd99/oauth2-server
 import:
 - package: github.com/ory-am/fosite
   version: ~0.5.0
