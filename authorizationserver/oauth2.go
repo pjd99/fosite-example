@@ -31,7 +31,9 @@ func RegisterHandlers() {
 }
 
 // This is an exemplary storage instance. We will add a client and a user to it so we can use these later on.
-var store = storage.NewExampleStore()
+// var store = storage.NewExampleStore()
+
+var store = storage.LoadStore()
 
 var config = new(compose.Config)
 
@@ -125,6 +127,7 @@ func newSession(user string) *Session {
             			fosite.AccessToken:   time.Now().Add(1 * time.Hour),
             			fosite.RefreshToken:  time.Now().AddDate(0, 0, 14),
         		},
+			Username: user,
 		},
         }
 }

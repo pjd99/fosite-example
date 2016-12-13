@@ -8,6 +8,7 @@ import (
 
 func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 	// This context will be passed to all methods.
+
 	ctx := fosite.NewContext()
 
 	// Create an empty session object which will be passed to the request handlers
@@ -23,11 +24,13 @@ func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 	mySessionData.JWTClaims.Add("_id", "578e280b2629a7da0416303b")
 	mySessionData.JWTClaims.Add("apps", []string{"70B3D57ED000124B"})
 
-
+	log.Printf("Session data:  %s\n", mySessionData)
+	
 	// This will create an access request object and iterate through the registered TokenEndpointHandlers to validate the request.
 	accessRequest, err := oauth2.NewAccessRequest(ctx, req, mySessionData)
 
 	log.Printf("Request info: %s", req)
+
 
 	// Catch any errors, e.g.:
 	// * unknown client
@@ -37,6 +40,13 @@ func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 		log.Printf("Error occurred in NewAccessRequest: %s\nStack: \n%s", err, err.(stackTracer).StackTrace())
 		oauth2.WriteAccessError(rw, accessRequest, err)
 		return
+	} else {
+		currentSession := accessRequest.GetSession()
+        	if currentSession != nil {
+                	userName :=  currentSession.GetUsername()
+                	log.Printf("Uname or email: %s\n", userName)
+			log.Printf("Session data:  %s\n", currentSession)
+        	}
 	}
 
 	// Grant requested scopes
