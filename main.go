@@ -2,15 +2,20 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"github.com/pjd99/oauth2-server/authorizationserver"
 	"github.com/pjd99/oauth2-server/oauth2client"
 	"github.com/pjd99/oauth2-server/resourceserver"
+	"github.com/ory-am/fosite/storage"
 	goauth "golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
+	"github.com/dgrijalva/jwt-go"
 	"log"
 	"net/http"
 	"os/exec"
 	"encoding/json"
+	"database/sql"
+        _ "github.com/go-sql-driver/mysql"
 )
 
 // Struct for JSON reply to applications GET request
@@ -42,10 +47,15 @@ var appClientConf = clientcredentials.Config{
 	TokenURL:     "http://localhost:3846/users/token",
 }
 
+var pubKey string = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4f5wg5l2hKsTeNem/V41\nfGnJm6gOdrj8ym3rFkEU/wT8RDtnSgFEZOQpHEgQ7JL38xUfU0Y3g6aYw9QT0hJ7\nmCpz9Er5qLaMXJwZxzHzAahlfA0icqabvJOMvQtzD6uQv6wPEyZtDTWiQi9AXwBp\nHssPnpYGIn20ZZuNlX2BrClciHhCPUIIZOQn/MmqTD31jSyjoQoV7MhhMTATKJx2\nXrHhR+1DcKJzQBSTAGnpYVaqpsARap+nwRipr3nUTuxyGohBTSmjJ2usSeQXHI3b\nODIRe1AuTyHceAbewn8b462yEWKARdpd9AjQW5SIVPfdsz5B6GlYQ5LdYKtznTuy\n7wIDAQAB\n-----END PUBLIC KEY-----\n"
+
 func main() {
+
+	var db *sql.DB = storage.GetDatabase()
+	defer db.Close()
 	// navigation
 	http.HandleFunc("/", HomeHandler(clientConf)) // show some links on the index
-	
+
 	// Token api
 	http.HandleFunc("/key", PublicKeyHandler())
 
@@ -71,24 +81,91 @@ func main() {
 
 func ApplicationReqHandler() func(rw http.ResponseWriter, req *http.Request) {
         return func(rw http.ResponseWriter, req *http.Request){
-	
-	rw.Header().Set("Content-Type:", "application/json; charset=utf-8")
-	var app1 = []Application1{
-	   Application1 {
-        	Eui:   "70B3D57ED000124B",
-        	Name: "ess demo",
-    		Owner: "pauldoherty@rfproximity.com",
-    		AccessKeys: []string{"AfRmGNnMzWO4FpZ0QezbBPIm5JmgE0Z9tC6SoyUVCNw="},
-    		Valid: true },
-       }
-	json.NewEncoder(rw).Encode(app1) 
-	
+
+		rw.Header().Set("Content-Type:", "application/json; charset=utf-8")
+
+		var authString string
+
+		var app1 = []Application1{}
+
+		authString = req.Header.Get("Authorization")
+
+		stringSlice := strings.Split(authString, " ")
+
+		if len(stringSlice) == 2 {
+			tokenType := stringSlice[0]
+			authToken  := stringSlice[1]
+
+			if tokenType == "bearer" {
+				 // Parse takes the token string and a function for looking up the key. The latter is especially
+                        	// useful if you use multiple keys for your application.  The standard is to use 'kid' in the
+                        	// head of the token to identify which key to use, but the parsed token (head and claims) is provided
+                       		// to the callback, providing flexibility.
+                        	token, err := jwt.Parse(authToken, func(token *jwt.Token) (interface{}, error) {
+	                        	// Don't forget to validate the alg is what you expect:
+        	                        if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+                	                        return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+                        	        }
+                                	anoPubKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(pubKey))
+                                	if err != nil {
+                                		fmt.Errorf("failed to parse DER encoded public key: " + err.Error())
+                                	}
+                                	return anoPubKey, nil
+                        	})
+
+
+                        	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+                                	email := claims["email"]
+
+					var db *sql.DB = storage.GetDatabase()
+					var databaseAppEUI  string
+              				var databaseName  string
+              				var databaseOwner  string
+              				var databaseAccess_key  string
+              				var databaseValid  int
+					rows, err := db.Query("SELECT applications.app_eui, applications.name, applications.owner, applications.access_key, applications.valid FROM applications INNER JOIN user_application ON applications.app_eui = user_application.app_eui INNER JOIN users ON user_application.user_id = users.user_id WHERE users.email = ?", email)
+					if err != nil {
+              				       log.Fatal(err)
+              				}
+					defer rows.Close()
+
+					for rows.Next() {
+                      				err := rows.Scan(&databaseAppEUI, &databaseName, &databaseOwner, &databaseAccess_key, &databaseValid)
+                      				if err != nil {
+                              				log.Fatal(err)
+                      				}
+						var b bool
+						if databaseValid >= 1{
+							b = true
+						} 
+						a:=  Application1 {
+                        				Eui:   databaseAppEUI,
+                        				Name: databaseName,
+                        				Owner: databaseOwner,
+                        				AccessKeys: []string{databaseAccess_key},
+                        				Valid: b }
+                      				app1 = append(app1, a)
+              				}
+              				err = rows.Err()
+              				if err != nil {
+                      				log.Fatal(err)
+              				}
+
+                        	} else {
+                                	fmt.Println(err)
+                        	}
+
+
+			}
+		}
+
+		json.NewEncoder(rw).Encode(app1)
 	}
-} 
+}
 
 func PublicKeyHandler() func(rw http.ResponseWriter, req *http.Request) {
         return func(rw http.ResponseWriter, req *http.Request){ 
-		mapA := map[string]string{"algorithm": "RS256", "key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4f5wg5l2hKsTeNem/V41\nfGnJm6gOdrj8ym3rFkEU/wT8RDtnSgFEZOQpHEgQ7JL38xUfU0Y3g6aYw9QT0hJ7\nmCpz9Er5qLaMXJwZxzHzAahlfA0icqabvJOMvQtzD6uQv6wPEyZtDTWiQi9AXwBp\nHssPnpYGIn20ZZuNlX2BrClciHhCPUIIZOQn/MmqTD31jSyjoQoV7MhhMTATKJx2\nXrHhR+1DcKJzQBSTAGnpYVaqpsARap+nwRipr3nUTuxyGohBTSmjJ2usSeQXHI3b\nODIRe1AuTyHceAbewn8b462yEWKARdpd9AjQW5SIVPfdsz5B6GlYQ5LdYKtznTuy\n7wIDAQAB\n-----END PUBLIC KEY-----\n"}
+		mapA := map[string]string{"algorithm": "RS256", "key": pubKey}
         	//mapB, _ := json.Marshal(mapA)
 		json.NewEncoder(rw).Encode(mapA)
 	}
