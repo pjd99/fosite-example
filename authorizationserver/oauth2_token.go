@@ -1,7 +1,10 @@
 package authorizationserver
 
 import (
+	"fmt"
+	"strings"
 	"github.com/ory-am/fosite"
+	"github.com/dgrijalva/jwt-go"
 	"log"
 	"net/http"
 	"github.com/ory-am/fosite/storage"
@@ -10,6 +13,10 @@ import (
 )
 
 var err error
+
+var pubKey string = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4f5wg5l2hKsTeNem/V41\nfGnJm6gOdrj8ym3rFkEU/wT8RDtnSgFEZOQpHEgQ7JL38xUfU0Y3g6aYw9QT0hJ7\nmCpz9Er5qLaMXJwZxzHzAahlfA0icqabvJOMvQtzD6uQv6wPEyZtDTWiQi9AXwBp\nHssPnpYGIn20ZZuNlX2BrClciHhCPUIIZOQn/MmqTD31jSyjoQoV7MhhMTATKJx2\nXrHhR+1DcKJzQBSTAGnpYVaqpsARap+nwRipr3nUTuxyGohBTSmjJ2usSeQXHI3b\nODIRe1AuTyHceAbewn8b462yEWKARdpd9AjQW5SIVPfdsz5B6GlYQ5LdYKtznTuy\n7wIDAQAB\n-----END PUBLIC KEY-----\n"
+
+
 
 func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 	// This context will be passed to all methods.
@@ -28,6 +35,31 @@ func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 
 	if req.PostForm.Get("grant_type") == "password" {
 		username = req.PostForm.Get("username")
+	} else if req.PostForm.Get("grant_type") == "refresh_token"{
+		
+		refToken := req.PostForm.Get("refresh_token")
+		
+        token, err := jwt.Parse(refToken, func(token *jwt.Token) (interface{}, error) {
+            // Don't forget to validate the alg is what you expect:
+        	if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+	        	return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+        	}
+            anoPubKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(pubKey))
+            if err != nil {
+            	fmt.Errorf("failed to parse DER encoded public key: " + err.Error())
+            }
+            return anoPubKey, nil
+        })
+
+
+        if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+            username = claims["email"].(string)
+			
+    	} else {
+            fmt.Println(err)
+			username = "578e280b2629a7da0416303b"
+    	}
+		
 	} else {
 		username = "578e280b2629a7da0416303b"
 	}
@@ -35,7 +67,7 @@ func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 	// Create an empty session object which will be passed to the request handlers
 	mySessionData := newSession(username)
 
-	if req.PostForm.Get("grant_type") == "password" {
+	if ((req.PostForm.Get("grant_type") == "password") || (req.PostForm.Get("grant_type") == "refresh_token")){
 
 
 		/*****
@@ -57,13 +89,14 @@ func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 		var db *sql.DB = storage.GetDatabase()
 
    		// Grab from the database 
-    		var databaseUsername  string
-    		var databasePassword  string
+    	var databaseUsername  string
+    	var databasePassword  string
 		var databaseFirst_name  string
-                var databaseLast_name  string
+        var databaseLast_name  string
 		var databaseEmail  string
-                var databaseCreated  string
-    		err := db.QueryRow("SELECT user_name, password, first_name, last_name, email, created FROM users WHERE email=?", username).Scan(&databaseUsername, &databasePassword, &databaseFirst_name, &databaseLast_name, &databaseEmail, &databaseCreated)
+        var databaseCreated  string
+		var databaseScope string
+    	err := db.QueryRow("SELECT user_name, password, first_name, last_name, email, scope, created FROM users WHERE email=?", username).Scan(&databaseUsername, &databasePassword, &databaseFirst_name, &databaseLast_name, &databaseEmail, &databaseScope, &databaseCreated)
    		//if err == nil {
         	//	fmt.Printf("username: %s and password: %s", databaseUsername, databasePassword)
         	//	return
@@ -72,6 +105,16 @@ func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 		mySessionData.JWTClaims.Add("username", databaseUsername)
 		mySessionData.JWTClaims.Add("created", databaseCreated)
 		mySessionData.JWTClaims.Add("name", map[string]string{"last": databaseLast_name, "first":databaseFirst_name})
+		
+		//var scopeItems []string
+	    result := strings.Split(databaseScope, ",")
+	       // Display all elements.
+	       //for i := range result {
+			   //scopeItems = append(scopeItems, result[i])
+	           //fmt.Println(result[i])
+			   //}
+		mySessionData.JWTClaims.Add("scope", result)
+		//mySessionData.JWTClaims.Add("scope", []string{"profile", "apps"})
 
 		var databaseAppEUI string
 
@@ -106,7 +149,6 @@ func tokenEndpoint(rw http.ResponseWriter, req *http.Request) {
 
 		log.Printf("Client secret: %s\n", clientSecret)
 		mySessionData.JWTClaims.Add("valid", true)
-		mySessionData.JWTClaims.Add("scope", []string{"profile", "apps"})
 		mySessionData.JWTClaims.Add("_id", "578e280b2629a7da0416303b")
 	}
 

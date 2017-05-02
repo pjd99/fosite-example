@@ -132,6 +132,13 @@ func newSession(user string) *Session {
         }
 }
 
+func ReloadUsers(name string, secret string) error { 
+	err = store.ReloadUsers(name, secret)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 func mustRSAKey() *rsa.PrivateKey { 
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
